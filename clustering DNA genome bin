@@ -1,0 +1,64 @@
+### genrate cell by bin matrix  ###
+rm(list = ls())
+
+suppressPackageStartupMessages(library(dplyr)) 
+library(ggplot2)
+library(pheatmap)
+library(RColorBrewer)
+suppressPackageStartupMessages(library(Seurat))
+suppressPackageStartupMessages(library(Signac))
+suppressPackageStartupMessages(library(harmony))
+#suppressPackageStartupMessages(library(EnsDb.Mmusculus.v79))
+suppressPackageStartupMessages(library(EnsDb.Hsapiens.v86))
+library(Seurat)
+library(Signac)
+
+source("/Users/likai/Downloads/basics.R")
+source("/Users/likai/Downloads/DPT_help_20240308.R")
+
+
+hg38 <- read.table("/Users/likai/Downloads/hg38.main.chrom.sizes.txt", row.names = 1)
+hg38 <- t(hg38) %>% as.data.frame()
+
+annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+seqlevelsStyle(annotations) <- 'UCSC'
+
+
+s <- "SM-NEIZW-BC074_22HK7LLT3"
+path <- "/Users/likai/Downloads/"
+frip <- ImportArcFRiP(raw_count = paste0(path, "sm-neizw_DNA_FRiP_file_2/", s, "_clean_fragments.tsv.gz_Count.xls"),
+                      frip_count = paste0(path, "sm-neizw_DNA_FRiP_file_2/", s, "_FRiP_fragments.tsv_Count.xls"))
+head(frip)
+fliter <- frip$counts_unique > 700 & frip$frip > 0.3
+frip_fliter <- frip[fliter,]
+
+path <- "/Users/likai/Downloads/sm-neizw_raw_DNA_fragments/"
+f <- "BC074"
+frags <- CreateFragmentObject(paste0(path, f, "_fragments.tsv.gz"),  cells = as.vector(frip_fliter$bc))  # , assay = "DNA"
+obj <- GenomeBinMatrix(frags, genome = unlist(hg38), binsize = 5000, cells = as.vector(frip_fliter$bc))
+saveRDS(obj, paste0(path,f, "_GenomeBin_5k.mtx.rds"))
+
+
+
+path <- "/Users/likai/Downloads/sm-neizw_raw_DNA_fragments/"
+f <- "BC074"
+counts <-  readRDS(paste0(path,f, "_GenomeBin_5k.mtx.rds"))
+
+
+mtx <- CreateChromatinAssay(counts = counts, sep = c(":", "-"), genome = "hg38",
+                            fragments = paste0(path, f, "_fragments.tsv.gz"), 
+                            min.cells = 5, min.features = 5)
+mmg <- CreateSeuratObject(mtx, assay = "DNA")
+#mmg$sample <- substr(colnames(mmg), 0, 5)
+Annotation(mmg) <- annotations
+mmg <- FindTopFeatures(mmg, min.cutoff = 'q15')
+mmg <- RunTFIDF(mmg, method = 3, verbose = F)
+mmg <- RunSVD(mmg)
+
+mmg <- RunUMAP(mmg, reduction = "lsi", dims = 2:30)
+
+mmg <- FindNeighbors(object = mmg, reduction = 'lsi', dims = 2:30, verbose=F)
+mmg <- FindClusters(object = mmg, resolution = 0.5)
+
+p1 <- DimPlot(mmg)
+p1
